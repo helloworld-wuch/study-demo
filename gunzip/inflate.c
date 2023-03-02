@@ -28,78 +28,111 @@
 //一次性读取文件数据(最大CHUNK个字节)，并对数据进行压缩
 int main(int argc, char **argv) {
     int ret;
-    z_stream strm;
+    z_stream strm_de, strm_in;
     char in[CHUNK];
     char out[CHUNK];
-    FILE *source;
+    FILE *src, *dst;
+    int windowBits = 15;
+    int GZIP_ENCODING = 16;
 
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <source_file>\n", argv[0]);
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <src_file> <dst_file>\n", argv[0]);
         exit(1);
     }
 
     // 打开源文件和目标文件
-    source = fopen(argv[1], "rb");
-    if (source == NULL) {
+    src = fopen(argv[1], "rb");
+    if (src == NULL) {
         fprintf(stderr, "Can't open file %s for reading\n", argv[1]);
         exit(1);
     }
 
+    dst = fopen(argv[1], "rb");
+    if (src == NULL) {
+        fprintf(stderr, "Can't open file %s for reading\n", argv[2]);
+        exit(1);
+    }
+
     // 初始化压缩流
-    memset(&strm, 0, sizeof(strm));
-    strm.zalloc = Z_NULL;
-    strm.zfree  = Z_NULL;
-    strm.opaque = Z_NULL;
+    memset(&strm_de, 0, sizeof(strm_de));
+    strm_de.zalloc = Z_NULL;
+    strm_de.zfree  = Z_NULL;
+    strm_de.opaque = Z_NULL;
 
 /**
 *** deflate（压缩）操作的初始化
-*** 1、deflateInit2()即对strm类型的变量的初始化
+*** 1、deflateInit2()即对strm_de类型的变量的初始化
 *** 2、Z_DEFAULT_COMPRESSION指定默认的压缩级别
 *** 3、windowBits|GZIP_ENCODING设置gzip压缩格式，windowBits指定压缩窗口的大小，GZIP_ENCODING指定压缩格式为gzip格式
 *** 4、8指定压缩数据块的大小，也称为压缩级别
 *** 5、Z_DEFAULT_STRATEGY指定压缩策略
 **/
-    if (inflateInit2(&strm, MAX_WBITS + 16) != Z_OK) {
+    if (deflateInit2(&strm_de, Z_DEFAULT_COMPRESSION, Z_DEFLATED, windowBits|GZIP_ENCODING, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
         fprintf(stderr, "Error: failed to initialize zlib deflate stream\n");
         exit(1);
     }
 
     // 读取源文件并压缩数据
     do {
-        strm.avail_in = fread(in, 1, CHUNK, source);
-        if (ferror(source)) {
-            (void)inflateEnd(&strm);
-            fprintf(stderr, "Error: failed to read source file\n");
+        strm_de.avail_in = fread(in, 1, CHUNK, src);
+        if (ferror(src)) {
+            (void)deflateEnd(&strm_de);
+            fprintf(stderr, "Error: failed to read src file\n");
             exit(1);
         }
 
-        if (strm.avail_in == 0) break;
-        strm.next_in = (unsigned char *)in;
+        if (strm_de.avail_in == 0) break;
+        strm_de.next_in = (unsigned char *)in;
 
         do {
-            strm.avail_out = CHUNK;
-            strm.next_out = (unsigned char *)out;
-            ret = inflate(&strm, Z_FINISH);
+            strm_de.avail_out = CHUNK;
+            strm_de.next_out = (unsigned char *)out;
+            ret = deflate(&strm_de, Z_FINISH);
             if (ret == Z_STREAM_ERROR) {
-                (void)inflateEnd(&strm);
+                (void)deflateEnd(&strm_de);
                 fprintf(stderr, "Error: zlib deflate failed\n");
                 exit(1);
             }
-        } while (strm.avail_out == 0);
+        } while (strm_de.avail_out == 0);
 
     } while (ret != Z_STREAM_END);
 
-    int i = 0;
-    for (; i<strm.total_out; ++i)
-    {
-        printf("%02x ", out[i]);
+    // 初始化压缩流
+    memset(&strm_in, 0, sizeof(strm_in));
+    memset(&in, 0, sizeof(CHUNK));
+    strm_in.zalloc = Z_NULL;
+    strm_in.zfree  = Z_NULL;
+    strm_in.opaque = Z_NULL;
+
+    if (inflateInit2(&strm_in, MAX_WBITS + 16) != Z_OK) {
+        fprintf(stderr, "Error: failed to initialize zlib inflate stream\n");
+        exit(1);
     }
-    printf("\nincompressed size: %lu\n", strm.total_out);
+
+    // 解压数据
+    strm_in.avail_in = strm_de.total_out;
+    if (strm_in.avail_in == 0) break;
+    strm_in.next_in = (unsigned char *)out;
+
+    do {
+        strm_in.avail_out = CHUNK;
+        strm_in.next_out = (unsigned char *)in;
+        ret = inflate(&strm_in, Z_FINISH);
+        if (ret == Z_STREAM_ERROR) {
+            (void)inflateEnd(&strm_in);
+            fprintf(stderr, "Error: zlib inflate failed\n");
+            exit(1);
+        }
+    } while (strm_in.avail_out == 0);
+
+    printf("len:%lu, data:%s\n", strm_in.total_out, in);        
 
 
     // 结束压缩流并关闭文件
-    (void)inflateEnd(&strm);
-    fclose(source);
+    (void)deflateEnd(&strm_de);
+    (void)inflateEnd(&strm_in);
+    fclose(src);
+    fclose(dst);
 
     return 0;
 }
