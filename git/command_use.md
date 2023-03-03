@@ -20,4 +20,7 @@ git checkout <commit-SHA>
 git commit --amend
 git push --force origin <branch-name>
 
+6、若出现ssh_exchange_identification: Connection closed by remote host，则重启sshd
+service sshd restart
+
 

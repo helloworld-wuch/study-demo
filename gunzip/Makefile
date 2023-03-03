@@ -1,8 +1,8 @@
 
-SOURCE = $(wildcard ./inflate.c)     #获取所有的.c文件  
+SOURCE = $(wildcard ./decryptInflate.c)     #获取所有的.c文件  
 OBJ = $(patsubst %.c, %.o, $(SOURCE))   #将.c文件转为.o文件  
 
-LIB_PATH = -lz
+LIB_PATH = -lz -lssl -lcrypto
 
 TARGET = inflate
 
