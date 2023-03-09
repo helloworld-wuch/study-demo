@@ -47,21 +47,21 @@ struct ngx_pool_large_s {
 
 
 typedef struct {
-    u_char               *last;
-    u_char               *end;
-    ngx_pool_t           *next;
+    u_char               *last;   //内存块中last指向还没有用过的内存的头部（比如要分配5个字节，那么从last开始分配）
+    u_char               *end;    //当前内存块中末尾
+    ngx_pool_t           *next;   //下一块chunck
     ngx_uint_t            failed;
 } ngx_pool_data_t;
 
 
 struct ngx_pool_s {
-    ngx_pool_data_t       d;
-    size_t                max;
-    ngx_pool_t           *current;
-    ngx_chain_t          *chain;
-    ngx_pool_large_t     *large;
-    ngx_pool_cleanup_t   *cleanup;
-    ngx_log_t            *log;
+    ngx_pool_data_t       d;       //存储一些chunck块的指针信息
+    size_t                max;     //chunk块的大小
+    ngx_pool_t           *current; //当前pool(chunck)查找空余chunck的起始遍历的地址
+    ngx_chain_t          *chain;   //用于存储buffer的链结构（在内存池中并没有使用）
+    ngx_pool_large_t     *large;   //大块
+    ngx_pool_cleanup_t   *cleanup; //用于清理小块内存
+    ngx_log_t            *log;     //日志相关
 };
 
 

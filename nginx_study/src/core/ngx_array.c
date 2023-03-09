@@ -9,6 +9,11 @@
 #include <ngx_core.h>
 
 
+/// @brief  创建n个size大小的数组
+/// @param p 内存池指针
+/// @param n 申请的数组元素个数
+/// @param size 数组元素对应的空间大小
+/// @return 数组头的地址
 ngx_array_t *
 ngx_array_create(ngx_pool_t *p, ngx_uint_t n, size_t size)
 {
@@ -27,6 +32,8 @@ ngx_array_create(ngx_pool_t *p, ngx_uint_t n, size_t size)
 }
 
 
+/// @brief 
+/// @param a 
 void
 ngx_array_destroy(ngx_array_t *a)
 {
@@ -44,6 +51,11 @@ ngx_array_destroy(ngx_array_t *a)
 }
 
 
+/// @brief 根据数组a指针, 从空闲数组元素内push一个空闲元素，
+///        若无空闲数组元素，则对空闲的内存池进行扩容来增大数组a的空间
+///        若无空闲内存池，则申请2倍大小的数组空间，并将数据全部拷贝
+/// @param a 数组a
+/// @return  空闲元素的地址
 void *
 ngx_array_push(ngx_array_t *a)
 {
