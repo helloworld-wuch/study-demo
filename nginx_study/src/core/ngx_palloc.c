@@ -331,7 +331,9 @@ ngx_pcalloc(ngx_pool_t *pool, size_t size)
     return p;
 }
 
-
+/*
+ * 申请size大小的特殊数据，并将ngx_pool_cleanup_t指针头插法插入到cleanup链
+ */
 ngx_pool_cleanup_t *
 ngx_pool_cleanup_add(ngx_pool_t *p, size_t size)
 {
@@ -362,7 +364,10 @@ ngx_pool_cleanup_add(ngx_pool_t *p, size_t size)
     return c;
 }
 
-
+/*
+ * 根据fd 遍历cleanup链 看是否存在，若存在则close关闭fd
+ * 只适用于ngx_open_cached_file, 此清理会删除文件系统的文件
+ */
 void
 ngx_pool_run_cleanup_file(ngx_pool_t *p, ngx_fd_t fd)
 {
@@ -383,7 +388,9 @@ ngx_pool_run_cleanup_file(ngx_pool_t *p, ngx_fd_t fd)
     }
 }
 
-
+/*
+ * 关闭ngx_pool_cleanup_file_t保存的fd
+ */
 void
 ngx_pool_cleanup_file(void *data)
 {
@@ -398,7 +405,9 @@ ngx_pool_cleanup_file(void *data)
     }
 }
 
-
+/*
+ * 从pool删除关联的文件unlik，只是针对内存池打开的文件进行unlik, 实际文件还存在
+ */
 void
 ngx_pool_delete_file(void *data)
 {
