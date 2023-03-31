@@ -91,6 +91,7 @@ ngx_strerror(ngx_err_t err, u_char *errstr, size_t size)
 }
 
 
+/// @brief 初始化Nginx全局的错误字符串数组, 将信息提前存到ngx_sys_errlist
 ngx_int_t
 ngx_strerror_init(void)
 {

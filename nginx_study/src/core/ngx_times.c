@@ -77,6 +77,7 @@ ngx_time_init(void)
 }
 
 
+/// @brief 更新当前时间
 void
 ngx_time_update(void)
 {

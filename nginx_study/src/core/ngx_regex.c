@@ -83,6 +83,7 @@ static ngx_uint_t              ngx_regex_match_data_size;
 #endif
 
 
+/// @brief 初始化正则表达式 
 void
 ngx_regex_init(void)
 {

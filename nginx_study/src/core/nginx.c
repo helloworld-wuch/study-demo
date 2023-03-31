@@ -387,6 +387,7 @@ main(int argc, char *const *argv)
 }
 
 
+/// @brief 显示版本信息 
 static void
 ngx_show_version_info(void)
 {
@@ -746,6 +747,7 @@ ngx_exec_new_binary(ngx_cycle_t *cycle, char *const *argv)
 }
 
 
+/// @brief 解析命令行参数和环境变量，并将解析后的数据存到对应全局变量
 static ngx_int_t
 ngx_get_options(int argc, char *const *argv)
 {
@@ -892,6 +894,7 @@ ngx_get_options(int argc, char *const *argv)
 }
 
 
+/// @brief 将命令行参数保存到全局变量ngx_argc, ngx_argv
 static ngx_int_t
 ngx_save_argv(ngx_cycle_t *cycle, int argc, char *const *argv)
 {
@@ -934,6 +937,7 @@ ngx_save_argv(ngx_cycle_t *cycle, int argc, char *const *argv)
 }
 
 
+/// @brief 
 static ngx_int_t
 ngx_process_options(ngx_cycle_t *cycle)
 {
