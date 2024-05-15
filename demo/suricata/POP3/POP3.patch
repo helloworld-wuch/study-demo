@@ -1,0 +1,1701 @@
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 8999f5d..f458d75 100755
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -47,6 +47,7 @@ app-layer-tftp.c app-layer-tftp.h \
+ app-layer-ikev2.c app-layer-ikev2.h \
+ app-layer-krb5.c app-layer-krb5.h \
+ app-layer-dhcp.c app-layer-dhcp.h \
++app-layer-pop3.c app-layer-pop3.h \
+ app-layer-template.c app-layer-template.h \
+ app-layer-template-rust.c app-layer-template-rust.h \
+ app-layer-rdp.c app-layer-rdp.h \
+@@ -350,6 +351,7 @@ output-json-ikev2.c output-json-ikev2.h \
+ output-json-krb5.c output-json-krb5.h \
+ output-json-dhcp.c output-json-dhcp.h \
+ output-json-snmp.c output-json-snmp.h \
++output-json-pop3.c output-json-pop3.h \
+ output-json-template.c output-json-template.h \
+ output-json-template-rust.c output-json-template-rust.h \
+ output-json-rdp.c output-json-rdp.h \
+diff --git a/src/app-layer-detect-proto.c b/src/app-layer-detect-proto.c
+index 7d6f985..3f016f3 100644
+--- a/src/app-layer-detect-proto.c
++++ b/src/app-layer-detect-proto.c
+@@ -869,6 +869,8 @@ static void AppLayerProtoDetectPrintProbingParsers(AppLayerProtoDetectProbingPar
+                         printf("            alproto: ALPROTO_SIP\n");
+                     else if (pp_pe->alproto == ALPROTO_TEMPLATE_RUST)
+                         printf("            alproto: ALPROTO_TEMPLATE_RUST\n");
++                    else if (pp_pe->alproto == ALPROTO_POP3)
++                        printf("            alproto: ALPROTO_POP3\n");
+                     else if (pp_pe->alproto == ALPROTO_TEMPLATE)
+                         printf("            alproto: ALPROTO_TEMPLATE\n");
+                     else if (pp_pe->alproto == ALPROTO_DNP3)
+@@ -942,6 +944,8 @@ static void AppLayerProtoDetectPrintProbingParsers(AppLayerProtoDetectProbingPar
+                     printf("            alproto: ALPROTO_SIP\n");
+                 else if (pp_pe->alproto == ALPROTO_TEMPLATE_RUST)
+                     printf("            alproto: ALPROTO_TEMPLATE_RUST\n");
++                else if (pp_pe->alproto == ALPROTO_POP3)
++                    printf("            alproto: ALPROTO_POP3\n");
+                 else if (pp_pe->alproto == ALPROTO_TEMPLATE)
+                     printf("            alproto: ALPROTO_TEMPLATE\n");
+                 else if (pp_pe->alproto == ALPROTO_DNP3)
+diff --git a/src/app-layer-parser.c b/src/app-layer-parser.c
+index 660289e..57e037b 100644
+--- a/src/app-layer-parser.c
++++ b/src/app-layer-parser.c
+@@ -68,6 +68,7 @@
+ #include "app-layer-dhcp.h"
+ #include "app-layer-snmp.h"
+ #include "app-layer-sip.h"
++#include "app-layer-pop3.h"
+ #include "app-layer-template.h"
+ #include "app-layer-template-rust.h"
+ #include "app-layer-rdp.h"
+@@ -1553,6 +1554,7 @@ void AppLayerParserRegisterProtocolParsers(void)
+     RegisterSNMPParsers();
+     RegisterSIPParsers();
+     RegisterTemplateRustParsers();
++    RegisterPOP3Parsers();
+     RegisterTemplateParsers();
+     RegisterRdpParsers();
+ 
+diff --git a/src/app-layer-protos.c b/src/app-layer-protos.c
+index 2a72051..cb25f07 100644
+--- a/src/app-layer-protos.c
++++ b/src/app-layer-protos.c
+@@ -102,6 +102,9 @@ const char *AppProtoToString(AppProto alproto)
+         case ALPROTO_SIP:
+             proto_name = "sip";
+             break;
++        case ALPROTO_POP3:
++            proto_name = "pop3";
++            break;
+         case ALPROTO_TEMPLATE:
+             proto_name = "template";
+             break;
+@@ -150,6 +153,7 @@ AppProto StringToAppProto(const char *proto_name)
+     if (strcmp(proto_name,"dhcp")==0) return ALPROTO_DHCP;
+     if (strcmp(proto_name,"snmp")==0) return ALPROTO_SNMP;
+     if (strcmp(proto_name,"sip")==0) return ALPROTO_SIP;
++    if (strcmp(proto_name,"pop3")==0) return ALPROTO_POP3;
+     if (strcmp(proto_name,"template")==0) return ALPROTO_TEMPLATE;
+     if (strcmp(proto_name,"template-rust")==0) return ALPROTO_TEMPLATE_RUST;
+     if (strcmp(proto_name,"rdp")==0) return ALPROTO_RDP;
+diff --git a/src/app-layer-protos.h b/src/app-layer-protos.h
+index 9ee8631..23b469c 100644
+--- a/src/app-layer-protos.h
++++ b/src/app-layer-protos.h
+@@ -51,6 +51,7 @@ enum AppProtoEnum {
+     ALPROTO_DHCP,
+     ALPROTO_SNMP,
+     ALPROTO_SIP,
++    ALPROTO_POP3,
+     ALPROTO_TEMPLATE,
+     ALPROTO_TEMPLATE_RUST,
+     ALPROTO_RDP,
+diff --git a/src/output-json-email-common.c b/src/output-json-email-common.c
+index 2f5620a..b16917d 100644
+--- a/src/output-json-email-common.c
++++ b/src/output-json-email-common.c
+@@ -50,6 +50,7 @@
+ #include "util-logopenfile.h"
+ #include "util-crypt.h"
+ 
++#include "app-layer-pop3.h"
+ #include "output-json.h"
+ #include "output-json-email-common.h"
+ 
+@@ -236,6 +237,7 @@ static void JsonEmailLogJSONCustom(OutputJsonEmailCtx *email_ctx, json_t *js, SM
+ static json_t *JsonEmailLogJsonData(const Flow *f, void *state, void *vtx, uint64_t tx_id)
+ {
+     SMTPState *smtp_state;
++    POP3State *pop3_state;
+     MimeDecParseState *mime_state;
+     MimeDecEntity *entity;
+ 
+@@ -247,6 +249,18 @@ static json_t *JsonEmailLogJsonData(const Flow *f, void *state, void *vtx, uint6
+     /* check if we have SMTP state or not */
+     AppProto proto = FlowGetAppProtocol(f);
+     switch (proto) {
++        case ALPROTO_POP3: {
++            pop3_state = (POP3State *)state;
++            if (pop3_state == NULL) {
++                SCLogDebug("no pop3 state, so no request logging");
++                SCReturnPtr(NULL, "json_t");
++            }
++            POP3Transaction *tx = vtx;
++            mime_state = tx->mime_state;
++            entity = tx->msg_tail;
++            SCLogDebug("lets go mime_state %p, entity %p, state_flag %u", mime_state, entity, mime_state ? mime_state->state_flag : 0);
++            }
++            break;
+         case ALPROTO_SMTP:
+             smtp_state = (SMTPState *)state;
+             if (smtp_state == NULL) {
+diff --git a/src/output.c b/src/output.c
+index c486999..9c7b31a 100644
+--- a/src/output.c
++++ b/src/output.c
+@@ -76,6 +76,7 @@
+ #include "output-json-dhcp.h"
+ #include "output-json-snmp.h"
+ #include "output-json-sip.h"
++#include "output-json-pop3.h"
+ #include "output-json-template.h"
+ #include "output-json-template-rust.h"
+ #include "output-json-rdp.h"
+@@ -1113,6 +1114,8 @@ void OutputRegisterLoggers(void)
+     JsonSNMPLogRegister();
+     /* SIP JSON logger. */
+     JsonSIPLogRegister();
++    /* Pop3 JSON logger. */
++    JsonPOP3LogRegister();
+     /* Template JSON logger. */
+     JsonTemplateLogRegister();
+     /* Template Rust JSON logger. */
+diff --git a/src/suricata-common.h b/src/suricata-common.h
+index ed71a88..2e01be3 100644
+--- a/src/suricata-common.h
++++ b/src/suricata-common.h
+@@ -440,6 +440,7 @@ typedef enum {
+     LOGGER_JSON_SNMP,
+     LOGGER_JSON_SIP,
+     LOGGER_JSON_TEMPLATE_RUST,
++    LOGGER_JSON_POP3,
+     LOGGER_JSON_TEMPLATE,
+     LOGGER_JSON_RDP,
+ 
+diff --git a/src/util-profiling.c b/src/util-profiling.c
+index 3fbcd6b..0db48de 100644
+--- a/src/util-profiling.c
++++ b/src/util-profiling.c
+@@ -1320,6 +1320,7 @@ const char * PacketProfileLoggertIdToString(LoggerId id)
+         CASE_CODE (LOGGER_JSON_TLS);
+         CASE_CODE (LOGGER_JSON_SIP);
+         CASE_CODE (LOGGER_JSON_TEMPLATE_RUST);
++        CASE_CODE (LOGGER_JSON_POP3);
+         CASE_CODE (LOGGER_JSON_TEMPLATE);
+         CASE_CODE (LOGGER_JSON_RDP);
+         CASE_CODE (LOGGER_TLS_STORE);
+diff --git a/suricata.yaml.in b/suricata.yaml.in
+index f0f8ce0..2bb1a6d 100644
+--- a/suricata.yaml.in
++++ b/suricata.yaml.in
+@@ -144,6 +144,7 @@ outputs:
+         header: X-Forwarded-For
+ 
+       types:
++        - pop3
+         - alert:
+             # payload: yes             # enable dumping payload in Base64
+             # payload-buffer-size: 4kb # max size of payload buffer to output in eve-log
+@@ -714,6 +715,26 @@ pcap-file:
+ # "detection-only" enables protocol detection only (parser disabled).
+ app-layer:
+   protocols:
++    pop3:
++      enabled: 
++      # Configure SMTP-MIME Decoder
++      mime:
++        # Decode MIME messages from SMTP transactions
++        # (may be resource intensive)
++        # This field supercedes all others because it turns the entire
++        # process on or off
++        decode-mime: yes
++
++        # Decode MIME entity bodies (ie. base64, quoted-printable, etc.)
++        decode-base64: yes
++        decode-quoted-printable: yes
++
++        # Maximum bytes per header data value stored in the data structure
++        # (default is 2000)
++        header-value-depth: 2000
++
++        # Extract URLs and save in state data structure
++        extract-urls: yes
+     krb5:
+       enabled: yes
+     snmp:
+diff --git a/src/app-layer-pop3.c b/src/app-layer-pop3.c
+new file mode 100644
+index 0000000..89dde5b
+--- /dev/null
++++ b/src/app-layer-pop3.c
+@@ -0,0 +1,1080 @@
++/* Copyright (C) 2007-2014 Open Information Security Foundation
++ *
++ * You can copy, redistribute or modify this Program under the terms of
++ * the GNU General Public License version 2 as published by the Free
++ * Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * version 2 along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1301, USA.
++ */
++
++/**
++ * \file
++ *
++ * \author Tom DeCanio <decanio.tom@gmail.com>
++ */
++
++#include "suricata.h"
++#include "suricata-common.h"
++#include "debug.h"
++#include "decode.h"
++#include "threads.h"
++
++#include "stream-tcp-private.h"
++#include "stream-tcp-reassemble.h"
++#include "stream-tcp.h"
++#include "stream.h"
++
++#include "app-layer-protos.h"
++#include "app-layer-parser.h"
++#include "app-layer-pop3.h"
++
++#include "util-mpm.h"
++#include "util-debug.h"
++#include "util-byte.h"
++#include "util-unittest.h"
++#include "util-byte.h"
++#include "util-unittest-helper.h"
++#include "util-memcmp.h"
++#include "flow-util.h"
++
++#include "detect-engine.h"
++#include "detect-engine-state.h"
++#include "detect-parse.h"
++
++#include "decode-events.h"
++#include "conf.h"
++
++#define POP3_MAX_REQUEST_AND_REPLY_LINE_LENGTH 510
++
++#define POP3_COMMAND_BUFFER_STEPS 5
++
++/* we are in process of parsing a fresh command.  Just a placeholder.  If we
++ * are not in STATE_COMMAND_DATA_MODE, we have to be in this mode */
++#define POP3_PARSER_STATE_COMMAND_MODE            0x00
++/* we are in mode of parsing a command's data.  Used when we are parsing tls
++ * or accepting the rfc 2822 mail after DATA command */
++#define POP3_PARSER_STATE_COMMAND_DATA_MODE       0x01
++/* Used when we are still in the process of parsing a server command.  Used
++ * with multi-line replies and the stream is fragmented before all the lines
++ * for a response is seen */
++#define POP3_PARSER_STATE_PARSING_SERVER_RESPONSE 0x02
++/* Used to indicate that the parser has seen the first reply */
++#define POP3_PARSER_STATE_FIRST_REPLY_SEEN        0x04
++/* Used to indicate that the parser is parsing a multiline reply */
++#define POP3_PARSER_STATE_PARSING_MULTILINE_REPLY 0x08
++
++/* Various POP3 commands
++ * We currently have var-ified just STARTTLS and DATA, since we need to them
++ * for state transitions.  The rest are just indicate as OTHER_CMD.  Other
++ * commands would be introduced as and when needed */
++#define POP3_COMMAND_USER      1
++#define POP3_COMMAND_RETR      2
++/* not an actual command per se, but the mode where we accept the mail after
++ * DATA has it's own reply code for completion, from the server.  We give this
++ * stage a pseudo command of it's own, so that we can add this to the command
++ * buffer to match with the reply */
++#define POP3_COMMAND_DATA_MODE 4
++/* All other commands are represented by this var */
++#define POP3_COMMAND_OTHER_CMD 5
++
++SCEnumCharMap pop3_decoder_event_table[ ] = {
++    { "INVALID_REPLY",           POP3_DECODER_EVENT_INVALID_REPLY },
++    { "UNABLE_TO_MATCH_REPLY_WITH_REQUEST",
++      POP3_DECODER_EVENT_UNABLE_TO_MATCH_REPLY_WITH_REQUEST },
++    { "MAX_COMMAND_LINE_LEN_EXCEEDED",
++      POP3_DECODER_EVENT_MAX_COMMAND_LINE_LEN_EXCEEDED },
++    { "MAX_REPLY_LINE_LEN_EXCEEDED",
++      POP3_DECODER_EVENT_MAX_REPLY_LINE_LEN_EXCEEDED },
++    { "INVALID_PIPELINED_SEQUENCE",
++      POP3_DECODER_EVENT_INVALID_PIPELINED_SEQUENCE },
++    { "BDAT_CHUNK_LEN_EXCEEDED",
++      POP3_DECODER_EVENT_BDAT_CHUNK_LEN_EXCEEDED },
++    { "NO_SERVER_WELCOME_MESSAGE",
++      POP3_DECODER_EVENT_NO_SERVER_WELCOME_MESSAGE },
++    { "TLS_REJECTED",
++      POP3_DECODER_EVENT_TLS_REJECTED },
++    { "DATA_COMMAND_REJECTED",
++      POP3_DECODER_EVENT_DATA_COMMAND_REJECTED },
++
++    /* MIME Events */
++    { "MIME_PARSE_FAILED",
++      POP3_DECODER_EVENT_MIME_PARSE_FAILED },
++    { "MIME_MALFORMED_MSG",
++      POP3_DECODER_EVENT_MIME_MALFORMED_MSG },
++    { "MIME_INVALID_BASE64",
++      POP3_DECODER_EVENT_MIME_INVALID_BASE64 },
++    { "MIME_INVALID_QP",
++      POP3_DECODER_EVENT_MIME_INVALID_QP },
++    { "MIME_LONG_LINE",
++      POP3_DECODER_EVENT_MIME_LONG_LINE },
++    { "MIME_LONG_ENC_LINE",
++      POP3_DECODER_EVENT_MIME_LONG_ENC_LINE },
++    { "MIME_LONG_HEADER_NAME",
++      POP3_DECODER_EVENT_MIME_LONG_HEADER_NAME },
++    { "MIME_LONG_HEADER_VALUE",
++      POP3_DECODER_EVENT_MIME_LONG_HEADER_VALUE },
++
++    { NULL,                      -1 },
++};
++
++typedef struct POP3Config {
++
++    int decode_mime;
++    MimeDecConfig mime_config;
++    uint32_t content_limit;
++    uint32_t content_inspect_min_size;
++    uint32_t content_inspect_window;
++
++    StreamingBufferConfig sbcfg;
++} POP3Config;
++
++/* Create POP3 config structure */
++static POP3Config pop3_config = { 0, { 0, 0, 0, 0, 0 }, 0, 0, 0, STREAMING_BUFFER_CONFIG_INITIALIZER };
++
++/**
++ * \brief Configure POP3 Mime Decoder by parsing out 'pop3-mime' section of YAML
++ * config file
++ *
++ * \return none
++ */
++static void POP3Configure(void) {
++
++    SCEnter();
++    int ret = 0, val;
++    intmax_t imval;
++
++    ConfNode *config = ConfGetNode("app-layer.protocols.pop3.mime");
++    if (config != NULL) {
++
++        ret = ConfGetChildValueBool(config, "decode-mime", &val);
++        if (ret) {
++            pop3_config.decode_mime = val;
++        }
++
++        ret = ConfGetChildValueBool(config, "decode-base64", &val);
++        if (ret) {
++            pop3_config.mime_config.decode_base64 = val;
++        }
++
++        ret = ConfGetChildValueBool(config, "decode-quoted-printable", &val);
++        if (ret) {
++            pop3_config.mime_config.decode_quoted_printable = val;
++        }
++
++        ret = ConfGetChildValueInt(config, "header-value-depth", &imval);
++        if (ret) {
++            pop3_config.mime_config.header_value_depth = (uint32_t) imval;
++        }
++
++        ret = ConfGetChildValueBool(config, "extract-urls", &val);
++        if (ret) {
++            pop3_config.mime_config.extract_urls = val;
++        }
++    }
++
++    /* Pass mime config data to MimeDec API */
++    MimeDecSetConfig(&pop3_config.mime_config);
++
++    SCReturn;
++}
++
++static POP3Transaction *POP3TransactionCreate(void)
++{
++    POP3Transaction *tx = SCCalloc(1, sizeof(*tx));
++    if (tx == NULL) {
++        return NULL;
++    }
++
++    tx->mime_state = NULL;
++    return tx;
++}
++
++static int POP3ProcessDataChunk(const uint8_t *chunk, uint32_t len,
++        MimeDecParseState *state) {
++
++    int ret = MIME_DEC_OK;
++    Flow *flow = (Flow *) state->data;
++    POP3State *pop3_state = (POP3State *) flow->alstate;
++    MimeDecEntity *entity = (MimeDecEntity *) state->stack->top->data;
++    FileContainer *files = NULL;
++    uint16_t flags = 0;
++
++    /* Set flags */
++    if (flow->flags & FLOWFILE_NO_STORE_TS) {
++        flags |= FILE_NOSTORE;
++    }
++
++    if (flow->flags & FLOWFILE_NO_MAGIC_TS) {
++        flags |= FILE_NOMAGIC;
++    }
++
++    if (flow->flags & FLOWFILE_NO_MD5_TS) {
++        flags |= FILE_NOMD5;
++    }
++
++    /* Find file */
++    if (entity->ctnt_flags & CTNT_IS_ATTACHMENT) {
++
++        /* Make sure file container allocated */
++        if (pop3_state->files_ts == NULL) {
++            pop3_state->files_ts = FileContainerAlloc();
++            if (pop3_state->files_ts == NULL) {
++                ret = MIME_DEC_ERR_MEM;
++                SCLogError(SC_ERR_MEM_ALLOC, "Could not create file container");
++                goto end;
++            }
++        }
++        files = pop3_state->files_ts;
++
++        /* Open file if necessary */
++        if (state->body_begin) {
++
++            if (SCLogDebugEnabled()) {
++                SCLogDebug("Opening file...%u bytes", len);
++                printf("File - ");
++                for (uint32_t i = 0; i < entity->filename_len; i++) {
++                    printf("%c", entity->filename[i]);
++                }
++                printf("\n");
++            }
++
++            /* Set storage flag if applicable since only the first file in the
++             * flow seems to be processed by the 'filestore' detector */
++            if (files->head != NULL && (files->head->flags & FILE_STORE)) {
++                flags |= FILE_STORE;
++            }
++
++            if (FileOpenFileWithId(files, &pop3_config.sbcfg, pop3_state->bdat_chunk_idx++, 
++                    (uint8_t *) entity->filename, entity->filename_len,
++                    (uint8_t *) chunk, len, flags) != 0) {
++                ret = MIME_DEC_ERR_DATA;
++                SCLogDebug("FileOpenFile() failed");
++            }
++
++            /* If close in the same chunk, then pass in empty bytes */
++            if (state->body_end) {
++
++                SCLogDebug("Closing file...%u bytes", len);
++
++                if (files && files->tail && files->tail->state == FILE_STATE_OPENED) {
++                    ret = FileCloseFile(files, (uint8_t *) NULL, 0, flags);
++                    if (ret != 0) {
++                        SCLogDebug("FileCloseFile() failed: %d", ret);
++                    }
++                } else {
++                    SCLogDebug("File already closed");
++                }
++            }
++        } else if (state->body_end) {
++            /* Close file */
++            SCLogDebug("Closing file...%u bytes", len);
++
++            if (files && files->tail && files->tail->state == FILE_STATE_OPENED) {
++                ret = FileCloseFile(files, (uint8_t *) chunk, len, flags);
++                if (ret != 0) {
++                    SCLogDebug("FileCloseFile() failed: %d", ret);
++                }
++            } else {
++                SCLogDebug("File already closed");
++            }
++        } else {
++            /* Append data chunk to file */
++            SCLogDebug("Appending file...%u bytes", len);
++
++            /* 0 is ok, -2 is not stored, -1 is error */
++            ret = FileAppendData(files, (uint8_t *) chunk, len);
++            if (ret == -2) {
++                ret = 0;
++                SCLogDebug("FileAppendData() - file no longer being extracted");
++            } else if (ret < 0) {
++                SCLogDebug("FileAppendData() failed: %d", ret);
++            }
++        }
++
++        if (ret == MIME_DEC_OK) {
++            SCLogDebug("Successfully processed file data!");
++        }
++    } else {
++        SCLogDebug("Body not a Ctnt_attachment");
++    }
++
++    if (files != NULL) {
++        FilePrune(files);
++    }
++end:
++    SCReturnInt(ret);
++}
++
++/**
++ * \internal
++ * \brief Get the next line from input.  It doesn't do any length validation.
++ *
++ * \param state The pop3 state.
++ *
++ * \retval  0 On suceess.
++ * \retval -1 Either when we don't have any new lines to supply anymore or
++ *            on failure.
++ */
++static int POP3GetLine(POP3State *state)
++{
++    SCEnter();
++    void *ptmp;
++
++    /* we have run out of input */
++    if (state->input_len <= 0)
++        return -1;
++
++    /* toserver */
++    if (state->direction == 0) {
++        if (state->ts_current_line_lf_seen == 1) {
++            /* we have seen the lf for the previous line.  Clear the parser
++             * details to parse new line */
++            state->ts_current_line_lf_seen = 0;
++            if (state->ts_current_line_db == 1) {
++                state->ts_current_line_db = 0;
++                SCFree(state->ts_db);
++                state->ts_db = NULL;
++                state->ts_db_len = 0;
++                state->current_line = NULL;
++                state->current_line_len = 0;
++            }
++        }
++
++        uint8_t *lf_idx = memchr(state->input, 0x0a, state->input_len);
++
++        if (lf_idx == NULL) {
++            /* fragmented lines.  Decoder event for special cases.  Not all
++             * fragmented lines should be treated as a possible evasion
++             * attempt.  With multi payload pop3 chunks we can have valid
++             * cases of fragmentation.  But within the same segment chunk
++             * if we see fragmentation then it's definitely something you
++             * should alert about */
++            if (state->ts_current_line_db == 0) {
++                state->ts_db = SCMalloc(state->input_len);
++                if (state->ts_db == NULL) {
++                    return -1;
++                }
++                state->ts_current_line_db = 1;
++                memcpy(state->ts_db, state->input, state->input_len);
++                state->ts_db_len = state->input_len;
++            } else {
++                ptmp = SCRealloc(state->ts_db,
++                                 (state->ts_db_len + state->input_len));
++                if (ptmp == NULL) {
++                    SCFree(state->ts_db);
++                    state->ts_db = NULL;
++                    state->ts_db_len = 0;
++                    return -1;
++                }
++                state->ts_db = ptmp;
++
++                memcpy(state->ts_db + state->ts_db_len,
++                        state->input, state->input_len);
++                state->ts_db_len += state->input_len;
++            } /* else */
++            state->input += state->input_len;
++            state->input_len = 0;
++
++            return -1;
++
++        } else {
++            state->ts_current_line_lf_seen = 1;
++
++            if (state->ts_current_line_db == 1) {
++                ptmp = SCRealloc(state->ts_db,
++                                 (state->ts_db_len + (lf_idx + 1 - state->input)));
++                if (ptmp == NULL) {
++                    SCFree(state->ts_db);
++                    state->ts_db = NULL;
++                    state->ts_db_len = 0;
++                    return -1;
++                }
++                state->ts_db = ptmp;
++
++                memcpy(state->ts_db + state->ts_db_len,
++                        state->input, (lf_idx + 1 - state->input));
++                state->ts_db_len += (lf_idx + 1 - state->input);
++
++                if (state->ts_db_len > 1 &&
++                        state->ts_db[state->ts_db_len - 2] == 0x0D) {
++                    state->ts_db_len -= 2;
++                    state->current_line_delimiter_len = 2;
++                } else {
++                    state->ts_db_len -= 1;
++                    state->current_line_delimiter_len = 1;
++                }
++
++                state->current_line = state->ts_db;
++                state->current_line_len = state->ts_db_len;
++
++            } else {
++                state->current_line = state->input;
++                state->current_line_len = lf_idx - state->input;
++
++                if (state->input != lf_idx &&
++                        *(lf_idx - 1) == 0x0D) {
++                    state->current_line_len--;
++                    state->current_line_delimiter_len = 2;
++                } else {
++                    state->current_line_delimiter_len = 1;
++                }
++            }
++
++            state->input_len -= (lf_idx - state->input) + 1;
++            state->input = (lf_idx + 1);
++
++            return 0;
++        }
++
++        /* toclient */
++    } else {
++        if (state->tc_current_line_lf_seen == 1) {
++            /* we have seen the lf for the previous line.  Clear the parser
++             * details to parse new line */
++            state->tc_current_line_lf_seen = 0;
++            if (state->tc_current_line_db == 1) {
++                state->tc_current_line_db = 0;
++                SCFree(state->tc_db);
++                state->tc_db = NULL;
++                state->tc_db_len = 0;
++                state->current_line = NULL;
++                state->current_line_len = 0;
++            }
++        }
++
++        uint8_t *lf_idx = memchr(state->input, 0x0a, state->input_len);
++
++        if (lf_idx == NULL) {
++            /* fragmented lines.  Decoder event for special cases.  Not all
++             * fragmented lines should be treated as a possible evasion
++             * attempt.  With multi payload pop3 chunks we can have valid
++             * cases of fragmentation.  But within the same segment chunk
++             * if we see fragmentation then it's definitely something you
++             * should alert about */
++            if (state->tc_current_line_db == 0) {
++                state->tc_db = SCMalloc(state->input_len);
++                if (state->tc_db == NULL) {
++                    return -1;
++                }
++                state->tc_current_line_db = 1;
++                memcpy(state->tc_db, state->input, state->input_len);
++                state->tc_db_len = state->input_len;
++            } else {
++                ptmp = SCRealloc(state->tc_db,
++                                 (state->tc_db_len + state->input_len));
++                if (ptmp == NULL) {
++                    SCFree(state->tc_db);
++                    state->tc_db = NULL;
++                    state->tc_db_len = 0;
++                    return -1;
++                }
++                state->tc_db = ptmp;
++
++                memcpy(state->tc_db + state->tc_db_len,
++                        state->input, state->input_len);
++                state->tc_db_len += state->input_len;
++            } /* else */
++            state->input += state->input_len;
++            state->input_len = 0;
++
++            return -1;
++
++        } else {
++            state->tc_current_line_lf_seen = 1;
++
++            if (state->tc_current_line_db == 1) {
++                ptmp = SCRealloc(state->tc_db,
++                                 (state->tc_db_len + (lf_idx + 1 - state->input)));
++                if (ptmp == NULL) {
++                    SCFree(state->tc_db);
++                    state->tc_db = NULL;
++                    state->tc_db_len = 0;
++                    return -1;
++                }
++                state->tc_db = ptmp;
++
++                memcpy(state->tc_db + state->tc_db_len,
++                        state->input, (lf_idx + 1 - state->input));
++                state->tc_db_len += (lf_idx + 1 - state->input);
++
++                if (state->tc_db_len > 1 &&
++                        state->tc_db[state->tc_db_len - 2] == 0x0D) {
++                    state->tc_db_len -= 2;
++                    state->current_line_delimiter_len = 2;
++                } else {
++                    state->tc_db_len -= 1;
++                    state->current_line_delimiter_len = 1;
++                }
++
++                state->current_line = state->tc_db;
++                state->current_line_len = state->tc_db_len;
++
++            } else {
++                state->current_line = state->input;
++                state->current_line_len = lf_idx - state->input;
++
++                if (state->input != lf_idx &&
++                        *(lf_idx - 1) == 0x0D) {
++                    state->current_line_len--;
++                    state->current_line_delimiter_len = 2;
++                } else {
++                    state->current_line_delimiter_len = 1;
++                }
++            }
++
++            state->input_len -= (lf_idx - state->input) + 1;
++            state->input = (lf_idx + 1);
++
++            return 0;
++        } /* else - if (lf_idx == NULL) */
++    }
++
++}
++
++static int POP3InsertCommandIntoCommandBuffer(uint8_t command, POP3State *state, Flow *f)
++{
++    SCEnter();
++    void *ptmp;
++
++    if (state->cmds_cnt >= state->cmds_buffer_len) {
++        int increment = POP3_COMMAND_BUFFER_STEPS;
++        if ((int)(state->cmds_buffer_len + POP3_COMMAND_BUFFER_STEPS) > (int)USHRT_MAX) {
++            increment = USHRT_MAX - state->cmds_buffer_len;
++        }
++
++        ptmp = SCRealloc(state->cmds,
++                         sizeof(uint8_t) * (state->cmds_buffer_len + increment));
++        if (ptmp == NULL) {
++            SCFree(state->cmds);
++            state->cmds = NULL;
++            SCLogDebug("SCRealloc failure");
++            return -1;
++        }
++        state->cmds = ptmp;
++
++        state->cmds_buffer_len += increment;
++    }
++    if (state->cmds_cnt >= 1) {
++        /* decoder event */
++        AppLayerDecoderEventsSetEvent(f,
++                POP3_DECODER_EVENT_INVALID_PIPELINED_SEQUENCE);
++        /* we have to have EHLO, DATA, VRFY, EXPN, TURN, QUIT, NOOP,
++         * STARTTLS as the last command in pipelined mode */
++    }
++
++    /** \todo decoder event */
++    if ((int)(state->cmds_cnt + 1) > (int)USHRT_MAX) {
++        SCLogDebug("command buffer overflow");
++        return -1;
++    }
++
++    state->cmds[state->cmds_cnt] = command;
++    state->cmds_cnt++;
++
++    return 0;
++}
++
++static int POP3ProcessCommandRETR(POP3State *state, Flow *f,
++        AppLayerParserState *pstate)
++{
++    SCEnter();
++    SCReturnInt(0);
++}
++
++/* toclient */
++static int POP3ProcessReply(POP3State *state, Flow *f,
++        AppLayerParserState *pstate)
++{
++    SCEnter();
++
++//printf("current_command: %d\n", state->current_command);
++    switch (state->current_command) {
++        case POP3_COMMAND_RETR:
++
++            if (state->parser_state & POP3_PARSER_STATE_COMMAND_DATA_MODE) {
++            if (state->current_line_len == 1 && state->current_line[0] == '.') {
++                state->parser_state &= ~POP3_PARSER_STATE_COMMAND_DATA_MODE;
++
++                if (pop3_config.decode_mime &&
++                    (state->curr_tx != NULL) &&
++                    (state->curr_tx->mime_state != NULL)) {
++                    /* Complete parsing task */
++//printf("Mime parse complete\n");
++                    int ret = MimeDecParseComplete(state->curr_tx->mime_state);
++                    if (ret != MIME_DEC_OK) {
++
++                        AppLayerDecoderEventsSetEvent(f, POP3_DECODER_EVENT_MIME_PARSE_FAILED);
++                        SCLogDebug("MimeDecParseComplete() function failed");
++                    }
++
++                    /* Generate decoder events */
++                    MimeDecEntity *msg = state->curr_tx->mime_state->msg;
++                    if (msg->anomaly_flags & ANOM_INVALID_BASE64) {
++                        AppLayerDecoderEventsSetEvent(f, POP3_DECODER_EVENT_MIME_INVALID_BASE64);
++                    }
++                    if (msg->anomaly_flags & ANOM_INVALID_QP) {
++                        AppLayerDecoderEventsSetEvent(f, POP3_DECODER_EVENT_MIME_INVALID_QP);
++                    }
++                    if (msg->anomaly_flags & ANOM_LONG_LINE) {
++                        AppLayerDecoderEventsSetEvent(f, POP3_DECODER_EVENT_MIME_LONG_LINE);
++                    }
++                    if (msg->anomaly_flags & ANOM_LONG_ENC_LINE) {
++                        AppLayerDecoderEventsSetEvent(f, POP3_DECODER_EVENT_MIME_LONG_ENC_LINE);
++                    }
++                    if (msg->anomaly_flags & ANOM_LONG_HEADER_NAME) {
++                        AppLayerDecoderEventsSetEvent(f, POP3_DECODER_EVENT_MIME_LONG_HEADER_NAME);
++                    }
++                    if (msg->anomaly_flags & ANOM_LONG_HEADER_VALUE) {
++                        AppLayerDecoderEventsSetEvent(f, POP3_DECODER_EVENT_MIME_LONG_HEADER_VALUE);
++                    }
++                    if (msg->anomaly_flags & ANOM_MALFORMED_MSG) {
++                        AppLayerDecoderEventsSetEvent(f, POP3_DECODER_EVENT_MIME_MALFORMED_MSG);
++                    }
++                }
++                if (state->curr_tx != NULL) {
++                    state->curr_tx->done = 1;
++                    SCLogDebug("marked tx as done");
++                }
++            }
++            /* If DATA, then parse out a MIME message */
++            if (state->parser_state & POP3_PARSER_STATE_COMMAND_DATA_MODE) {
++
++                if (pop3_config.decode_mime &&
++                    (state->curr_tx != NULL) &&
++                    (state->curr_tx->mime_state != NULL)) {
++                    int ret = MimeDecParseLine((const uint8_t *) state->current_line,
++                            state->current_line_len,
++                            state->current_line_delimiter_len,
++                            state->curr_tx->mime_state);
++                    if (ret != MIME_DEC_OK) {
++                        SCLogDebug("MimeDecParseLine() function returned an error code: %d", ret);
++                    }
++                }
++            }
++            } else if (state->current_line_len >= 3 &&
++                SCMemcmpLowercase("+ok", state->current_line, 3) == 0) {
++                state->parser_state |= POP3_PARSER_STATE_COMMAND_DATA_MODE;
++            }
++
++            break;
++        default:
++            break;
++    }
++    /* if it is a multi-line reply, we need to move the index only once for all
++     * the line of the reply.  We unset the multiline flag on the last
++     * line of the multiline reply, following which we increment the index */
++    if (!(state->parser_state & POP3_PARSER_STATE_PARSING_MULTILINE_REPLY)) {
++        state->cmds_idx++;
++    }
++
++    /* if we have matched all the buffered commands, reset the cnt and index */
++    if (state->cmds_idx == state->cmds_cnt) {
++        state->cmds_cnt = 0;
++        state->cmds_idx = 0;
++    }
++
++    return 0;
++}
++
++/* toserver */
++static int POP3ProcessRequest(POP3State *state, Flow *f,
++        AppLayerParserState *pstate)
++{
++    SCEnter();
++    POP3Transaction *tx = state->curr_tx;
++
++    //first or parser end
++    if (tx == NULL || (tx->done/* && !NoNewTx(state)*/)) {
++        tx = POP3TransactionCreate();
++        if (tx == NULL)
++            return -1;
++        state->curr_tx = tx;
++        TAILQ_INSERT_TAIL(&state->tx_list, tx, next);
++        tx->tx_id = state->tx_cnt++;
++    }
++
++
++    /* there are 2 commands that can push it into this COMMAND_DATA mode -
++     * STARTTLS and DATA */
++    if (!(state->parser_state & POP3_PARSER_STATE_COMMAND_DATA_MODE)) {
++        int r = 0;
++
++        if (state->current_line_len >= 4 &&
++                SCMemcmpLowercase("user", state->current_line, 4) == 0) {
++            state->current_command = POP3_COMMAND_USER;
++        } else if (state->current_line_len >= 4 &&
++                SCMemcmpLowercase("retr", state->current_line, 4) == 0) {
++            state->current_command = POP3_COMMAND_RETR;
++
++            if (pop3_config.decode_mime) {
++                tx->mime_state = MimeDecInitParser(f, POP3ProcessDataChunk);
++                if (tx->mime_state == NULL) {
++                    SCLogError(SC_ERR_MEM_ALLOC, "MimeDecInitParser() failed to "
++                            "allocate data");
++                    return MIME_DEC_ERR_MEM;
++                }
++
++                /* Add new MIME message to end of list */
++                if (tx->msg_head == NULL) {
++                    tx->msg_head = tx->mime_state->msg;
++                    tx->msg_tail = tx->mime_state->msg;
++                }
++                else {
++                    tx->msg_tail->next = tx->mime_state->msg;
++                    tx->msg_tail = tx->mime_state->msg;
++                }
++            }
++        } else {
++            state->current_command = POP3_COMMAND_OTHER_CMD;
++        }
++        /* Every command is inserted into a command buffer, to be matched
++         * against reply(ies) sent by the server */
++        if (POP3InsertCommandIntoCommandBuffer(state->current_command,
++                state, f) == -1) {
++            SCReturnInt(-1);
++        }
++
++        SCReturnInt(r);
++    }
++
++    switch (state->current_command) {
++    case POP3_COMMAND_RETR:
++        return POP3ProcessCommandRETR(state, f, pstate);
++    default:
++        /* we have nothing to do with any other command at this instant.
++         * Just let it go through */
++        SCReturnInt(0);
++    }
++}
++
++static int POP3Parse(int direction, Flow *f, POP3State *state,
++        AppLayerParserState *pstate, uint8_t *input,
++        uint32_t input_len,
++        void *local_data)
++{
++    SCEnter();
++
++    state->input = input;
++    state->input_len = input_len;
++    state->direction = direction;
++
++    /* toserver */
++    if (direction == 0) {
++        while (POP3GetLine(state) >= 0) {
++            if (POP3ProcessRequest(state, f, pstate) == -1)
++                SCReturnInt(-1);
++        }
++
++        /* toclient */
++    } else {
++        while (POP3GetLine(state) >= 0) {
++            if (POP3ProcessReply(state, f, pstate) == -1)
++                SCReturnInt(-1);
++        }
++    }
++
++    SCReturnInt(0);
++}
++
++static int POP3ParseClientRecord(Flow *f, void *alstate,
++        AppLayerParserState *pstate,
++        uint8_t *input, uint32_t input_len,
++        void *local_data)
++{
++    SCEnter();
++
++    /* first arg 0 is toserver */
++    return POP3Parse(0, f, alstate, pstate, input, input_len, local_data);
++}
++
++static int POP3ParseServerRecord(Flow *f, void *alstate,
++        AppLayerParserState *pstate,
++        uint8_t *input, uint32_t input_len,
++        void *local_data)
++{
++    SCEnter();
++
++    /* first arg 1 is toclient */
++    return POP3Parse(1, f, alstate, pstate, input, input_len, local_data);
++}
++
++/**
++ * \internal
++ * \brief Function to allocate POP3 state memory.
++ */
++static void *POP3StateAlloc(void)
++{
++    POP3State *pop3_state = SCMalloc(sizeof(POP3State));
++    if (unlikely(pop3_state == NULL))
++        return NULL;
++    memset(pop3_state, 0, sizeof(POP3State));
++
++    pop3_state->cmds = SCMalloc(sizeof(uint8_t) *
++            POP3_COMMAND_BUFFER_STEPS);
++    if (pop3_state->cmds == NULL) {
++        SCFree(pop3_state);
++        return NULL;
++    }
++    pop3_state->cmds_buffer_len = POP3_COMMAND_BUFFER_STEPS;
++
++    TAILQ_INIT(&pop3_state->tx_list);
++
++    return pop3_state;
++}
++
++static void POP3TransactionFree(POP3Transaction *tx, POP3State *state)
++{
++    if (tx->mime_state != NULL) {
++        MimeDecDeInitParser(tx->mime_state);
++    }
++    /* Free list of MIME message recursively */
++    MimeDecFreeEntity(tx->msg_head);
++
++    if (tx->decoder_events != NULL)
++        AppLayerDecoderEventsFreeEvents(&tx->decoder_events);
++
++    if (tx->de_state != NULL)
++        DetectEngineStateFree(tx->de_state);
++
++    SCFree(tx);
++}
++
++/**
++ * \internal
++ * \brief Function to free POP3 state memory.
++ */
++static void POP3StateFree(void *p)
++{
++    POP3State *pop3_state = (POP3State *)p;
++
++    if (pop3_state->cmds != NULL) {
++        SCFree(pop3_state->cmds);
++    }
++    if (pop3_state->ts_current_line_db) {
++        SCFree(pop3_state->ts_db);
++    }
++    if (pop3_state->tc_current_line_db) {
++        SCFree(pop3_state->tc_db);
++    }
++
++    FileContainerFree(pop3_state->files_ts);
++
++    POP3Transaction *tx = NULL;
++    while ((tx = TAILQ_FIRST(&pop3_state->tx_list))) {
++        TAILQ_REMOVE(&pop3_state->tx_list, tx, next);
++        POP3TransactionFree(tx, pop3_state);
++    }
++
++    SCFree(pop3_state);
++
++    return;
++}
++
++int POP3StateGetEventInfo(const char *event_name,
++                          int *event_id, AppLayerEventType *event_type)
++{
++    *event_id = SCMapEnumNameToValue(event_name, pop3_decoder_event_table);
++    if (*event_id == -1) {
++        SCLogError(SC_ERR_INVALID_ENUM_MAP, "event \"%s\" not present in "
++                   "pop3's enum map table.",  event_name);
++        /* yes this is fatal */
++        return -1;
++    }
++
++    *event_type = APP_LAYER_EVENT_TYPE_PACKET;
++
++    return 0;
++}
++
++static void POP3StateTransactionFree (void *state, uint64_t tx_id)
++{
++    POP3State *pop3_state = state;
++    POP3Transaction *tx = NULL;
++    TAILQ_FOREACH(tx, &pop3_state->tx_list, next) {
++        if (tx_id < tx->tx_id)
++            break;
++        else if (tx_id > tx->tx_id)
++            continue;
++
++        if (tx == pop3_state->curr_tx)
++            pop3_state->curr_tx = NULL;
++        TAILQ_REMOVE(&pop3_state->tx_list, tx, next);
++        POP3TransactionFree(tx, state);
++        break;
++    }
++
++
++}
++
++/** \todo slow */
++static uint64_t POP3StateGetTxCnt(void *state)
++{
++    POP3State *pop3_state = state;
++    return pop3_state->tx_cnt;
++}
++
++static void *POP3StateGetTx(void *state, uint64_t id)
++{
++    POP3State *pop3_state = state;
++    if (pop3_state) {
++        POP3Transaction *tx = NULL;
++
++        if (pop3_state->curr_tx == NULL)
++            return NULL;
++        if (pop3_state->curr_tx->tx_id == id)
++            return pop3_state->curr_tx;
++
++        TAILQ_FOREACH(tx, &pop3_state->tx_list, next) {
++            if (tx->tx_id == id)
++                return tx;
++        }
++    }
++    return NULL;
++
++}
++
++static int POP3StateGetAlstateProgressCompletionStatus(uint8_t direction) {
++    return 1;
++}
++
++static int POP3StateGetAlstateProgress(void *vtx, uint8_t direction)
++{
++    POP3Transaction *tx = vtx;
++    return tx->done;
++}
++
++/** \internal
++ *  \brief get files callback
++ *  \param state state ptr
++ *  \param direction flow direction
++ *  \retval files files ptr
++ */
++static FileContainer *POP3StateGetFiles(void *state, uint8_t direction) {
++    if (state == NULL)
++        return NULL;
++
++    POP3State *pop3_state = (POP3State *)state;
++
++    if (direction & STREAM_TOCLIENT) {
++        SCReturnPtr(NULL, "FileContainer");
++    } else {
++        SCReturnPtr(pop3_state->files_ts, "FileContainer");
++    }
++}
++
++static void POP3StateTruncate(void *state, uint8_t direction)
++{
++    FileContainer *fc = POP3StateGetFiles(state, direction);
++    if (fc != NULL) {
++        SCLogDebug("truncating stream, closing files in %s direction (container %p)",
++                direction & STREAM_TOCLIENT ? "STREAM_TOCLIENT" : "STREAM_TOSERVER", fc);
++        FileTruncateAllOpenFiles(fc);
++    }
++}
++
++static AppLayerDecoderEvents *POP3GetEvents(void *state, uint64_t tx_id)
++{
++    SCLogDebug("get POP3 events for TX %"PRIu64, tx_id);
++
++    POP3Transaction *tx = POP3StateGetTx(state, tx_id);
++    if (tx != NULL) {
++        return tx->decoder_events;
++    }
++    return NULL;
++}
++
++static DetectEngineState *POP3GetTxDetectState(void *vtx)
++{
++    POP3Transaction *tx = (POP3Transaction *)vtx;
++    return tx->de_state;
++}
++
++static int POP3SetTxDetectState(void *state, void *vtx, DetectEngineState *s)
++{
++    POP3Transaction *tx = (POP3Transaction *)vtx;
++    tx->de_state = s;
++    return 0;
++}
++
++
++/**
++ * \brief Register the SMPT Protocol parser.
++ */
++void RegisterPOP3Parsers(void)
++{
++    char *proto_name = "pop3";
++
++    if (AppLayerProtoDetectConfProtoDetectionEnabled("tcp", proto_name)) {
++        AppLayerProtoDetectRegisterProtocol(ALPROTO_POP3, proto_name);
++        AppLayerProtoDetectPMRegisterPatternCS(IPPROTO_TCP, ALPROTO_POP3,
++                                               "+OK ", 4, 0,
++                                               STREAM_TOCLIENT);
++        AppLayerProtoDetectPMRegisterPatternCS(IPPROTO_TCP, ALPROTO_POP3,
++                                               "+OK|00|", 4, 0,
++                                               STREAM_TOCLIENT);
++    } else {
++        SCLogInfo("Protocol detection and parser disabled for %s protocol.",
++                  proto_name);
++        return;
++    }
++
++    if (AppLayerParserConfParserEnabled("tcp", proto_name)) {
++
++        AppLayerParserRegisterStateFuncs(IPPROTO_TCP, ALPROTO_POP3,
++                                         POP3StateAlloc, POP3StateFree);
++        AppLayerParserRegisterGetFilesFunc(IPPROTO_TCP, ALPROTO_POP3,
++                                           POP3StateGetFiles);
++
++        AppLayerParserRegisterParser(IPPROTO_TCP, ALPROTO_POP3, STREAM_TOSERVER,
++                                     POP3ParseClientRecord);
++        AppLayerParserRegisterParser(IPPROTO_TCP, ALPROTO_POP3, STREAM_TOCLIENT,
++                                     POP3ParseServerRecord);
++
++        AppLayerParserRegisterGetEventInfo(IPPROTO_TCP, ALPROTO_POP3,
++                                           POP3StateGetEventInfo);
++        AppLayerParserRegisterGetEventsFunc(IPPROTO_TCP, ALPROTO_POP3, POP3GetEvents);
++        AppLayerParserRegisterDetectStateFuncs(IPPROTO_TCP, ALPROTO_POP3, POP3GetTxDetectState, POP3SetTxDetectState);
++
++
++        AppLayerParserRegisterTxFreeFunc(IPPROTO_TCP, ALPROTO_POP3, POP3StateTransactionFree);
++        AppLayerParserRegisterGetFilesFunc(IPPROTO_TCP, ALPROTO_POP3, POP3StateGetFiles);
++        AppLayerParserRegisterGetStateProgressFunc(IPPROTO_TCP, ALPROTO_POP3, POP3StateGetAlstateProgress);
++        AppLayerParserRegisterGetTxCnt(IPPROTO_TCP, ALPROTO_POP3, POP3StateGetTxCnt);
++        AppLayerParserRegisterGetTx(IPPROTO_TCP, ALPROTO_POP3, POP3StateGetTx);
++        AppLayerParserRegisterGetStateProgressCompletionStatus(ALPROTO_POP3,
++                                                               POP3StateGetAlstateProgressCompletionStatus);
++        AppLayerParserRegisterTruncateFunc(IPPROTO_TCP, ALPROTO_POP3, POP3StateTruncate);
++
++    } else {
++        SCLogInfo("Parsed disabled for %s protocol. Protocol detection"
++                  "still on.", proto_name);
++    }
++
++    POP3Configure();
++
++#ifdef UNITTESTS
++    AppLayerParserRegisterProtocolUnittests(IPPROTO_TCP, ALPROTO_POP3, POP3ParserRegisterTests);
++#endif
++    return;
++
++}
++
++/***************************************Unittests******************************/
++
++#ifdef UNITTESTS
++#endif /* UNITTESTS */
++
++void POP3ParserRegisterTests(void)
++{
++#ifdef UNITTESTS
++#endif /* UNITTESTS */
++    return;
++}
+\ No newline at end of file
+diff --git a/src/app-layer-pop3.h b/src/app-layer-pop3.h
+new file mode 100644
+index 0000000..ec252c6
+--- /dev/null
++++ b/src/app-layer-pop3.h
+@@ -0,0 +1,131 @@
++/* Copyright (C) 2015-2018 Open Information Security Foundation
++ *
++ * You can copy, redistribute or modify this Program under the terms of
++ * the GNU General Public License version 2 as published by the Free
++ * Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * version 2 along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1301, USA.
++ */
++
++/**
++ * \file
++ *
++ * \author FirstName LastName <yourname@domain>
++ */
++
++#ifndef __APP_LAYER_POP3_H__
++#define __APP_LAYER_POP3_H__
++
++#include "decode-events.h"
++#include "util-decode-mime.h"
++
++enum {
++    POP3_DECODER_EVENT_INVALID_REPLY,
++    POP3_DECODER_EVENT_UNABLE_TO_MATCH_REPLY_WITH_REQUEST,
++    POP3_DECODER_EVENT_MAX_COMMAND_LINE_LEN_EXCEEDED,
++    POP3_DECODER_EVENT_MAX_REPLY_LINE_LEN_EXCEEDED,
++    POP3_DECODER_EVENT_INVALID_PIPELINED_SEQUENCE,
++    POP3_DECODER_EVENT_BDAT_CHUNK_LEN_EXCEEDED,
++    POP3_DECODER_EVENT_NO_SERVER_WELCOME_MESSAGE,
++    POP3_DECODER_EVENT_TLS_REJECTED,
++    POP3_DECODER_EVENT_DATA_COMMAND_REJECTED,
++
++    /* MIME Events */
++    POP3_DECODER_EVENT_MIME_PARSE_FAILED,
++    POP3_DECODER_EVENT_MIME_MALFORMED_MSG,
++    POP3_DECODER_EVENT_MIME_INVALID_BASE64,
++    POP3_DECODER_EVENT_MIME_INVALID_QP,
++    POP3_DECODER_EVENT_MIME_LONG_LINE,
++    POP3_DECODER_EVENT_MIME_LONG_ENC_LINE,
++    POP3_DECODER_EVENT_MIME_LONG_HEADER_NAME,
++    POP3_DECODER_EVENT_MIME_LONG_HEADER_VALUE,
++};
++
++typedef struct POP3Transaction_ {
++    /** id of this tx, starting at 0 */
++    uint64_t tx_id;
++    int done;
++    /** the first message contained in the session */
++    MimeDecEntity *msg_head;
++    /** the last message contained in the session */
++    MimeDecEntity *msg_tail;
++    /** the mime decoding parser state */
++    MimeDecParseState *mime_state;
++
++    AppLayerDecoderEvents *decoder_events;          /**< per tx events */
++    DetectEngineState *de_state;
++
++    TAILQ_ENTRY(POP3Transaction_) next;
++} POP3Transaction;
++
++typedef struct POP3State_ {
++    POP3Transaction *curr_tx;
++    TAILQ_HEAD(, POP3Transaction_) tx_list;  /**< transaction list */
++    uint64_t tx_cnt;
++
++    /* current input that is being parsed */
++    uint8_t *input;
++    int32_t input_len;
++    uint8_t direction;
++
++    /* --parser details-- */
++    /** current line extracted by the parser from the call to POP3Getline() */
++    uint8_t *current_line;
++    /** length of the line in current_line.  Doesn't include the delimiter */
++    int32_t current_line_len;
++    uint8_t current_line_delimiter_len;
++
++    /** used to indicate if the current_line buffer is a malloced buffer.  We
++     * use a malloced buffer, if a line is fragmented */
++    uint8_t *tc_db;
++    int32_t tc_db_len;
++    uint8_t tc_current_line_db;
++    /** we have see LF for the currently parsed line */
++    uint8_t tc_current_line_lf_seen;
++
++    /** used to indicate if the current_line buffer is a malloced buffer.  We
++     * use a malloced buffer, if a line is fragmented */
++    uint8_t *ts_db;
++    int32_t ts_db_len;
++    uint8_t ts_current_line_db;
++    /** we have see LF for the currently parsed line */
++    uint8_t ts_current_line_lf_seen;
++
++    /** var to indicate parser state */
++    uint8_t parser_state;
++    /** current command in progress */
++    uint8_t current_command;
++    /** bdat chunk len */
++    uint32_t bdat_chunk_len;
++    /** bdat chunk idx */
++    uint32_t bdat_chunk_idx;
++
++    /* the request commands are store here and the reply handler uses these
++     * stored command in the buffer to match the reply(ies) with the command */
++    /** the command buffer */
++    uint8_t *cmds;
++    /** the buffer length */
++    uint16_t cmds_buffer_len;
++    /** no of commands stored in the above buffer */
++    uint16_t cmds_cnt;
++    /** index of the command in the buffer, currently in inspection by reply
++     *  handler */
++    uint16_t cmds_idx;
++
++    /* POP3 Mime decoding and file extraction */
++    /** the list of files sent to the server */
++    FileContainer *files_ts;
++} POP3State;
++
++void RegisterPOP3Parsers(void);
++void POP3ParserRegisterTests(void);
++
++#endif /* __APP_LAYER_POP3_H__ */
+diff --git a/src/output-json-pop3.c b/src/output-json-pop3.c
+new file mode 100644
+index 0000000..487c520
+--- /dev/null
++++ b/src/output-json-pop3.c
+@@ -0,0 +1,216 @@
++/* Copyright (C) 2007-2013 Open Information Security Foundation
++ *
++ * You can copy, redistribute or modify this Program under the terms of
++ * the GNU General Public License version 2 as published by the Free
++ * Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * version 2 along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1301, USA.
++ */
++
++/**
++ * \file
++ *
++ * \author Tom DeCanio <decanio.tom@gmail.com>
++ *
++ * Implements POP3 JSON logging portion of the engine.
++ */
++
++#include "suricata-common.h"
++#include "debug.h"
++#include "detect.h"
++#include "pkt-var.h"
++#include "conf.h"
++
++#include "threads.h"
++#include "threadvars.h"
++#include "tm-threads.h"
++
++#include "util-print.h"
++#include "util-unittest.h"
++
++#include "util-debug.h"
++
++#include "output.h"
++#include "app-layer-pop3.h"
++#include "app-layer.h"
++#include "app-layer-parser.h"
++#include "util-privs.h"
++#include "util-buffer.h"
++#include "util-proto-name.h"
++#include "util-logopenfile.h"
++#include "util-time.h"
++
++#include "output-json.h"
++#include "output-json-email-common.h"
++
++#ifdef HAVE_LIBJANSSON
++#include <jansson.h>
++
++static int JsonPop3Logger(ThreadVars *tv, void *thread_data, const Packet *p, Flow *f, void *state, void *tx, uint64_t tx_id)
++{
++    SCEnter();
++#if 1
++    JsonEmailLogThread *jhl = (JsonEmailLogThread *)thread_data;
++    MemBuffer *buffer = (MemBuffer *)jhl->buffer;
++
++    json_t *js = CreateJSONHeaderWithTxId((Packet *)p, 1, "pop3", tx_id);
++    if (unlikely(js == NULL))
++        return TM_ECODE_OK;
++
++    /* reset */
++    MemBufferReset(buffer);
++
++    if (JsonEmailLogJson(jhl, js, p, f, state, tx, tx_id) == TM_ECODE_OK) {
++        OutputJSONBuffer(js, jhl->emaillog_ctx->file_ctx, &jhl->buffer);
++    }
++    json_object_del(js, "email");
++
++    json_object_clear(js);
++    json_decref(js);
++
++    SCReturnInt(TM_ECODE_OK);
++
++#else
++    SCReturnInt(JsonEmailLogger(tv, thread_data, p, "pop3", f, state, tx, tx_id));
++#endif
++}
++
++#define DEFAULT_LOG_FILENAME "pop3.json"
++OutputCtx *OutputPop3LogInit(ConfNode *conf)
++{
++    LogFileCtx *file_ctx = LogFileNewCtx();
++    if(file_ctx == NULL) {
++        SCLogError(SC_ERR_HTTP_LOG_GENERIC, "couldn't create new file_ctx");
++        return NULL;
++    }
++
++    if (SCConfLogOpenGeneric(conf, file_ctx, DEFAULT_LOG_FILENAME, 1) < 0) {
++        LogFileFreeCtx(file_ctx);
++        return NULL;
++    }
++
++    OutputJsonEmailCtx *email_ctx = SCMalloc(sizeof(OutputJsonEmailCtx));
++    if (unlikely(email_ctx == NULL)) {
++        LogFileFreeCtx(file_ctx);
++        return NULL;
++    }
++
++    OutputCtx *output_ctx = SCCalloc(1, sizeof(OutputCtx));
++    if (unlikely(output_ctx == NULL)) {
++        LogFileFreeCtx(file_ctx);
++        SCFree(email_ctx);
++        return NULL;
++    }
++
++    email_ctx->file_ctx = file_ctx;
++
++    output_ctx->data = email_ctx;
++    output_ctx->DeInit = NULL;
++
++    /* enable the logger for the app layer */
++    AppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_POP3);
++
++    return output_ctx;
++}
++
++static OutputCtx *OutputPop3LogInitSub(ConfNode *conf, OutputCtx *parent_ctx)
++{
++    OutputJsonCtx *ojc = parent_ctx->data;
++
++    OutputJsonEmailCtx *email_ctx = SCMalloc(sizeof(OutputJsonEmailCtx));
++    if (unlikely(email_ctx == NULL))
++        return NULL;
++
++    OutputCtx *output_ctx = SCCalloc(1, sizeof(OutputCtx));
++    if (unlikely(output_ctx == NULL)) {
++        SCFree(email_ctx);
++        return NULL;
++    }
++
++    email_ctx->file_ctx = ojc->file_ctx;
++
++    OutputEmailInitConf(conf, email_ctx);
++
++    output_ctx->data = email_ctx;
++    output_ctx->DeInit = NULL;
++
++    /* enable the logger for the app layer */
++    AppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_POP3);
++
++    return output_ctx;
++}
++
++#define OUTPUT_BUFFER_SIZE 65535
++static TmEcode JsonPop3LogThreadInit(ThreadVars *t, void *initdata, void **data)
++{
++    JsonEmailLogThread *aft = SCMalloc(sizeof(JsonEmailLogThread));
++    if (unlikely(aft == NULL))
++        return TM_ECODE_FAILED;
++    memset(aft, 0, sizeof(JsonEmailLogThread));
++
++    if(initdata == NULL)
++    {
++        SCLogDebug("Error getting context for HTTPLog.  \"initdata\" argument NULL");
++        SCFree(aft);
++        return TM_ECODE_FAILED;
++    }
++
++    /* Use the Ouptut Context (file pointer and mutex) */
++    aft->emaillog_ctx = ((OutputCtx *)initdata)->data;
++
++    aft->buffer = MemBufferCreateNew(OUTPUT_BUFFER_SIZE);
++    if (aft->buffer == NULL) {
++        SCFree(aft);
++        return TM_ECODE_FAILED;
++    }
++
++    *data = (void *)aft;
++    return TM_ECODE_OK;
++}
++
++static TmEcode JsonPop3LogThreadDeinit(ThreadVars *t, void *data)
++{
++    JsonEmailLogThread *aft = (JsonEmailLogThread *)data;
++    if (aft == NULL) {
++        return TM_ECODE_OK;
++    }
++
++    MemBufferFree(aft->buffer);
++    /* clear memory */
++    memset(aft, 0, sizeof(JsonEmailLogThread));
++
++    SCFree(aft);
++    return TM_ECODE_OK;
++}
++
++void JsonPOP3LogRegister (void) {
++    /* register as separate module */
++    OutputRegisterTxModule(LOGGER_JSON_POP3, "JsonPop3Log", "pop3-json-log",
++                           OutputPop3LogInit, ALPROTO_POP3, JsonPop3Logger,
++                           JsonPop3LogThreadInit, JsonPop3LogThreadDeinit,
++                           NULL);
++
++    /* also register as child of eve-log */
++    OutputRegisterTxSubModule(LOGGER_JSON_POP3, "eve-log", "JsonPop3Log",
++                              "eve-log.pop3", OutputPop3LogInitSub,
++                               ALPROTO_POP3, JsonPop3Logger,
++                               JsonPop3LogThreadInit, JsonPop3LogThreadDeinit,
++                               NULL);
++}
++
++#else
++
++void JsonPOP3LogRegister (void)
++{
++    SCLogInfo("Can't init JSON output - JSON support was disabled during build.");
++}
++
++#endif
+\ No newline at end of file
+diff --git a/src/output-json-pop3.h b/src/output-json-pop3.h
+new file mode 100644
+index 0000000..af70b49
+--- /dev/null
++++ b/src/output-json-pop3.h
+@@ -0,0 +1,29 @@
++/* Copyright (C) 2015 Open Information Security Foundation
++ *
++ * You can copy, redistribute or modify this Program under the terms of
++ * the GNU General Public License version 2 as published by the Free
++ * Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * version 2 along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++ * 02110-1301, USA.
++ */
++
++/**
++ * \file
++ *
++ * \author FirstName LastName <name@domain>
++ */
++
++#ifndef __OUTPUT_JSON_POP3_H__
++#define __OUTPUT_JSON_POP3_H__
++
++void JsonPOP3LogRegister(void);
++
++#endif /* __OUTPUT_JSON_POP3_H__ */
